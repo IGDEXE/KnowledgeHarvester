@@ -1,30 +1,37 @@
 # KnowledgeHarvester
 
-KnowledgeHarvester é uma ferramenta para **coleta, normalização e estruturação de documentação técnica a partir de fontes web**, projetada para funcionar tanto localmente quanto em pipelines CI/CD.
+KnowledgeHarvester é uma ferramenta para **coleta, limpeza e consolidação de documentação técnica a partir de fontes web**, gerando uma base única estruturada e utilizável em projetos.
 
 ---
 
 ## 🧠 Conceito
 
-O projeto percorre uma documentação online, extrai conteúdo relevante (inclusive de sites modernos com JavaScript) e gera uma base estruturada pronta para uso em:
-
-* análise técnica
-* comparação com documentação interna
-* sistemas de IA (RAG / contexto)
-* consulta offline
+A ferramenta percorre uma documentação online, extrai o conteúdo relevante (incluindo sites modernos com JavaScript) e gera **um único arquivo consolidado**, otimizado para consulta e uso programático.
 
 Pipeline:
 
 ```text
-crawl → render → extract → normalize → classify → chunk → store
+crawl → render → clean → extract → filter → structure → consolidate
 ```
+
+---
+
+## 🎯 Objetivo
+
+Gerar uma base de conhecimento que seja:
+
+* consistente
+* deduplicada
+* navegável
+* sem ruído de UI
+* com contexto suficiente por seção
 
 ---
 
 ## ⚙️ Requisitos
 
 * Python 3.11+
-* Dependências definidas em `requirements.txt`
+* Dependências no `requirements.txt`
 
 Instalação:
 
@@ -52,48 +59,72 @@ python knowledge_harvester.py \
 
 | Parâmetro       | Obrigatório | Descrição                                  |
 | --------------- | ----------- | ------------------------------------------ |
-| `--base_url`    | ✔           | Domínio base                               |
-| `--start_url`   | ✔           | URL inicial                                |
+| `--base_url`    | ✔           | Domínio base da documentação               |
+| `--start_url`   | ✔           | URL inicial do crawl                       |
 | `--keywords`    | ✖           | Lista separada por vírgula para relevância |
 | `--link_filter` | ✖           | Restringe navegação por path               |
-| `--max_pages`   | ✖           | Limite de páginas                          |
-| `--min_score`   | ✖           | Score mínimo para inclusão                 |
+| `--max_pages`   | ✖           | Limite de páginas processadas              |
+| `--min_score`   | ✖           | Score mínimo para incluir conteúdo         |
 
 ---
 
-## 📂 Estrutura de saída
+## 📦 Saída
+
+A ferramenta gera **um único arquivo consolidado**:
 
 ```text
 output/
-├── raw/          # conteúdo bruto em Markdown
-├── structured/   # conteúdo com metadados
-├── chunked/      # conteúdo dividido para LLM
+└── knowledge_base.md
 ```
 
 ---
 
-## 🧠 Relevância
+## 🧠 Estrutura do conteúdo
 
-O sistema usa keywords para determinar importância:
+Cada página é organizada por seções:
 
-* cada ocorrência aumenta o score
-* páginas abaixo do threshold são descartadas
+```md
+# <URL da página>
 
----
+## <Seção>
 
-## ✂️ Chunking
-
-Os documentos são divididos automaticamente para:
-
-* evitar limites de contexto
-* facilitar recuperação de informação
-* melhorar uso em LLMs
+conteúdo...
 
 ---
 
-## ⚙️ Uso em CI/CD (GitHub Actions)
+# <próxima página>
+```
 
-### Execução do script
+---
+
+## 🔍 Processamento aplicado
+
+Durante a execução:
+
+* renderização completa via browser headless
+* remoção de elementos de UI (menu, sidebar, etc.)
+* extração do conteúdo principal
+* normalização para Markdown
+* remoção de duplicações
+* filtragem por relevância
+* agrupamento por página e seção
+
+---
+
+## ⚠️ Controle de escopo
+
+Para evitar crescimento excessivo:
+
+* o crawl é limitado por `max_pages`
+* URLs duplicadas são ignoradas
+* anchors (`#`) são descartados
+* conteúdo pequeno é filtrado
+
+---
+
+## ⚙️ Uso em CI/CD
+
+Exemplo de execução:
 
 ```yaml
 - name: Run KnowledgeHarvester
@@ -106,24 +137,9 @@ Os documentos são divididos automaticamente para:
 
 ---
 
-## 🔐 Configuração via Secrets
+## 📦 Publicação de artefato
 
-Recomendado usar variáveis protegidas:
-
-```yaml
-env:
-  BASE_URL: ${{ secrets.BASE_URL }}
-  START_URL: ${{ secrets.START_URL }}
-  KEYWORDS: ${{ secrets.KEYWORDS }}
-```
-
----
-
-## 📦 Publicação de artefatos
-
-⚠️ **Importante:** não é necessário criar zip manualmente.
-
-O GitHub Actions já faz isso automaticamente:
+Não é necessário zip manual:
 
 ```yaml
 - name: Upload artifact
@@ -135,20 +151,21 @@ O GitHub Actions já faz isso automaticamente:
 
 ---
 
-## 🚀 Características importantes
+## 🚀 Características
 
-* Compatível com sites modernos (SPA) via browser headless
-* Estrutura otimizada para uso com LLM
-* Pipeline automatizável
-* Configuração via CLI (sem arquivos estáticos)
+* compatível com SPA (docs modernas)
+* saída consolidada (sem fragmentação)
+* deduplicação automática
+* estrutura previsível
+* pronto para uso direto em projetos
 
 ---
 
 ## ⚠️ Limitações
 
-* Pode consumir mais recursos por usar browser headless
-* Crawl não é infinito (controlado por `max_pages`)
-* Qualidade depende da estrutura do site
+* consumo maior de recursos (uso de browser headless)
+* depende da estrutura HTML da fonte
+* não realiza análise semântica avançada
 
 ---
 

@@ -9,18 +9,19 @@ import hashlib
 from markdownify import markdownify as md
 from bs4 import BeautifulSoup
 
+
 # -------------------------
 # CLI
 # -------------------------
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="KnowledgeHarvester")
+    parser = argparse.ArgumentParser(description="KnowledgeHarvester - Single File Mode")
 
     parser.add_argument("--base_url", required=True)
     parser.add_argument("--start_url", required=True)
     parser.add_argument("--link_filter", default="")
     parser.add_argument("--keywords", default="")
-    parser.add_argument("--max_pages", type=int, default=200)
+    parser.add_argument("--max_pages", type=int, default=60)
     parser.add_argument("--min_score", type=int, default=2)
 
     return parser.parse_args()
@@ -30,6 +31,10 @@ def parse_args():
 # HELPERS
 # -------------------------
 
+def normalize_url(url):
+    return url.split("#")[0].rstrip("/")
+
+
 def is_valid(url, base_url, link_filter):
     p = urlparse(url)
     base = urlparse(base_url)
@@ -38,10 +43,6 @@ def is_valid(url, base_url, link_filter):
         p.netloc == base.netloc and
         (link_filter in p.path if link_filter else True)
     )
-
-
-def sanitize(url):
-    return re.sub(r"[^a-zA-Z0-9_-]", "_", urlparse(url).path) or "root"
 
 
 def hash_content(text):
@@ -55,7 +56,6 @@ def hash_content(text):
 def clean_html(html):
     soup = BeautifulSoup(html, "html.parser")
 
-    # remove lixo comum
     for tag in soup([
         "nav", "footer", "header", "aside",
         "script", "style", "noscript",
@@ -63,7 +63,6 @@ def clean_html(html):
     ]):
         tag.decompose()
 
-    # remove classes comuns de docs
     for cls in [
         "sidebar", "menu", "navigation", "toc",
         "breadcrumbs", "pagination"
@@ -75,16 +74,16 @@ def clean_html(html):
 
 
 def extract_main(soup):
-    main = (
+    return (
         soup.find("main") or
         soup.find("article") or
-        soup.find("div", {"role": "main"})
+        soup.find("div", {"role": "main"}) or
+        soup.body
     )
-    return main if main else soup.body
 
 
 # -------------------------
-# SCORING / CLASSIFICATION
+# SCORING
 # -------------------------
 
 def score(text, keywords):
@@ -92,52 +91,38 @@ def score(text, keywords):
     return sum(2 for k in keywords if k in t)
 
 
-def classify(text):
-    t = text.lower()
-    categories = []
-
-    if "api" in t:
-        categories.append("api")
-    if "auth" in t or "authentication" in t:
-        categories.append("auth")
-    if "scan" in t:
-        categories.append("scan")
-    if "policy" in t:
-        categories.append("policy")
-
-    return categories or ["general"]
-
-
 # -------------------------
-# CHUNK (SEMÂNTICO + TAMANHO)
+# STRUCTURE CONTENT
 # -------------------------
 
-def chunk_semantic(text, max_size=1500):
-    chunks = []
+def structure_page(url, markdown):
+    sections = []
     current = ""
-    title = "unknown"
+    title = "Content"
 
-    for line in text.split("\n"):
-        if line.startswith("#"):
-            if current and len(current) > 200:
-                chunks.append((title, current.strip()))
+    for line in markdown.split("\n"):
+        if line.startswith("# ") or line.startswith("## "):
+            if current.strip():
+                sections.append((title, current.strip()))
                 current = ""
 
-            title = line.strip()
-            current += line + "\n"
-
+            title = line.strip().replace("#", "").strip()
         else:
             current += line + "\n"
 
-        # fallback por tamanho
-        if len(current) > max_size:
-            chunks.append((title, current.strip()))
-            current = ""
+    if current.strip():
+        sections.append((title, current.strip()))
 
-    if current:
-        chunks.append((title, current.strip()))
+    # monta página estruturada
+    page = [f"# {url}"]
 
-    return chunks
+    for title, content in sections:
+        if len(content) < 200:
+            continue
+
+        page.append(f"\n## {title}\n{content}")
+
+    return "\n".join(page)
 
 
 # -------------------------
@@ -145,24 +130,21 @@ def chunk_semantic(text, max_size=1500):
 # -------------------------
 
 async def run(config):
-    ROOT = Path("output")
-    RAW = ROOT / "raw"
-    STRUCT = ROOT / "structured"
-    CHUNK = ROOT / "chunked"
-
-    for p in [RAW, STRUCT, CHUNK]:
-        p.mkdir(parents=True, exist_ok=True)
+    output_file = Path("output/knowledge_base.md")
+    output_file.parent.mkdir(exist_ok=True)
 
     visited = set()
-    queue = deque([config["start_url"]])
+    queue = deque([normalize_url(config["start_url"])])
     seen_hashes = set()
+
+    global_content = []
 
     async with async_playwright() as p:
         browser = await p.chromium.launch()
         page = await browser.new_page()
 
         while queue and len(visited) < config["max_pages"]:
-            url = queue.popleft()
+            url = normalize_url(queue.popleft())
 
             if url in visited:
                 continue
@@ -190,52 +172,39 @@ async def run(config):
                 continue
 
             markdown = md(str(main))
-            relevance = score(markdown, config["keywords"])
 
+            if len(markdown) < 300:
+                continue
+
+            relevance = score(markdown, config["keywords"])
             if relevance < config["min_score"]:
                 continue
 
-            name = sanitize(url)
-            categories = classify(markdown)
+            structured = structure_page(url, markdown)
+            global_content.append(structured)
 
-            # RAW
-            (RAW / f"{name}.md").write_text(markdown, encoding="utf-8")
-
-            # STRUCTURED
-            structured = f"""source: {url}
-score: {relevance}
-categories: {",".join(categories)}
-
-{markdown}
-"""
-            (STRUCT / f"{name}.md").write_text(structured, encoding="utf-8")
-
-            # CHUNKED (otimizado)
-            chunks = chunk_semantic(markdown)
-
-            for i, (title, content) in enumerate(chunks):
-                enriched = f"""source: {url}
-title: {title}
-categories: {",".join(categories)}
-chunk_id: {i}
-
-{content}
-"""
-                (CHUNK / f"{name}_{i}.md").write_text(enriched, encoding="utf-8")
-
-            # LINKS (SPA-safe)
+            # coleta links
             links = await page.eval_on_selector_all(
                 "a[href]",
                 "els => els.map(e => e.href)"
             )
 
             for link in links:
+                link = normalize_url(link)
+
+                if "#" in link:
+                    continue
+
                 if is_valid(link, config["base_url"], config["link_filter"]):
                     queue.append(link)
 
         await browser.close()
 
-    print(f"Done. Pages processed: {len(visited)}")
+    # salva tudo em 1 arquivo
+    output_file.write_text("\n\n---\n\n".join(global_content), encoding="utf-8")
+
+    print(f"\nDone. Pages processed: {len(visited)}")
+    print(f"Output: {output_file}")
 
 
 # -------------------------
