@@ -1,25 +1,19 @@
 # KnowledgeHarvester
 
-KnowledgeHarvester é uma ferramenta para **coleta, normalização e estruturação de documentação técnica a partir de fontes web**.
-
-O objetivo é transformar documentação online (HTML) em uma base local organizada, limpa e pronta para:
-
-* análise técnica
-* comparação com documentação interna
-* uso como contexto em sistemas de IA
-* construção de bases de conhecimento
+KnowledgeHarvester é uma ferramenta para **coleta, normalização e estruturação de documentação técnica a partir de fontes web**, com foco em uso automatizado via CLI e integração em pipelines CI/CD.
 
 ---
 
 ## 🧠 Conceito
 
-Documentação web normalmente apresenta:
+A ferramenta percorre uma documentação online, extrai conteúdo relevante e gera uma base local estruturada em Markdown, pronta para:
 
-* excesso de ruído (menus, navegação, scripts)
-* fragmentação em múltiplas páginas
-* dificuldade de reutilização programática
+* análise técnica
+* comparação com documentação interna
+* uso como contexto em LLMs
+* construção de bases de conhecimento
 
-KnowledgeHarvester resolve isso através de um pipeline simples:
+Pipeline:
 
 ```text
 crawl → clean → normalize → classify → chunk → store
@@ -27,101 +21,98 @@ crawl → clean → normalize → classify → chunk → store
 
 ---
 
-## ⚙️ O que o projeto faz
-
-* Navega automaticamente por uma documentação web
-* Extrai apenas o conteúdo relevante
-* Converte HTML para Markdown
-* Remove elementos irrelevantes (UI, scripts, etc.)
-* Deduplica conteúdo
-* Classifica por categorias (configuráveis)
-* Divide em chunks otimizados para consumo por LLMs
-* Salva em estrutura organizada no disco
-
----
-
-## 📂 Estrutura de saída
+## 📦 Saída gerada
 
 ```text
 output/
-├── raw/          ← conteúdo bruto convertido
-├── structured/   ← conteúdo com metadados
-├── chunked/      ← conteúdo dividido por contexto
+├── raw/          # conteúdo bruto
+├── structured/   # conteúdo com metadados
+├── chunked/      # conteúdo dividido para consumo
 ```
 
 ---
 
-## ▶️ Como usar
+## ▶️ Como usar (CLI)
 
-### 1. Criar um arquivo de configuração
+O KnowledgeHarvester não depende de arquivos de configuração.
+Toda a execução é feita via parâmetros.
 
-Exemplo (`veracode.json`):
-
-```json
-{
-  "base_url": "https://docs.veracode.com",
-  "start_url": "https://docs.veracode.com/r/c_about_veracode",
-  "link_filter": "/r/",
-  "keywords": ["scan", "api", "policy", "pipeline", "analysis"],
-  "categories": {
-    "sast": ["static analysis"],
-    "dast": ["dynamic analysis"],
-    "api": ["api"],
-    "auth": ["authentication"]
-  }
-}
-```
-
----
-
-### 2. Executar o script
+### Execução básica
 
 ```bash
-python knowledge_harvester.py --config veracode.json
+python knowledge_harvester.py \
+  --base_url "<BASE_URL>" \
+  --start_url "<START_URL>" \
+  --link_filter "<FILTER>" \
+  --keywords "<KEYWORDS>"
 ```
 
 ---
 
-## ⚙️ Parâmetros de configuração
+## ⚙️ Parâmetros
 
-| Campo         | Descrição                               |
-| ------------- | --------------------------------------- |
-| `base_url`    | Domínio base da documentação            |
-| `start_url`   | Página inicial do crawl                 |
-| `link_filter` | Filtro de URLs internas (opcional)      |
-| `keywords`    | Termos usados para relevância           |
-| `categories`  | Classificação baseada em palavras-chave |
-| `max_pages`   | Limite de páginas (opcional)            |
-| `delay`       | Delay entre requests (opcional)         |
-| `min_score`   | Score mínimo para incluir página        |
+| Parâmetro       | Obrigatório | Descrição                                        |
+| --------------- | ----------- | ------------------------------------------------ |
+| `--base_url`    | ✔           | Domínio base da documentação                     |
+| `--start_url`   | ✔           | URL inicial do crawl                             |
+| `--link_filter` | ✖           | Filtra caminhos internos (ex: `/docs/`)          |
+| `--keywords`    | ✖           | Lista separada por vírgula usada para relevância |
+| `--max_pages`   | ✖           | Limite de páginas                                |
+| `--delay`       | ✖           | Delay entre requests                             |
+| `--min_score`   | ✖           | Score mínimo para incluir conteúdo               |
 
 ---
 
-## 🧠 Classificação e relevância
+## 🧠 Relevância e classificação
 
-O projeto utiliza regras simples baseadas em texto:
+A ferramenta utiliza:
 
-* **score** → determina se o conteúdo é relevante
-* **categorias** → definidas por palavras-chave
+* **keywords** → determinam se o conteúdo é relevante
+* **classificação leve** → categorização baseada em termos
 
-Exemplo:
+Exemplo de formato esperado:
 
-```json
-"categories": {
-  "api": ["api", "endpoint"],
-  "auth": ["authentication", "token"]
-}
+```text
+keyword1,keyword2,keyword3
 ```
 
 ---
 
 ## ✂️ Chunking
 
-Os documentos são automaticamente divididos em partes menores para:
+Os documentos são automaticamente divididos com base em seções (`##`), respeitando limites de tamanho para facilitar uso posterior em LLMs.
 
-* facilitar uso em LLMs
-* melhorar recuperação de contexto
-* evitar limites de contexto
+---
+
+## ⚙️ Uso em CI/CD (GitHub Actions)
+
+O projeto foi projetado para rodar diretamente em pipelines.
+
+### Exemplo de execução no workflow
+
+```yaml
+- name: Run KnowledgeHarvester
+  run: |
+    python knowledge_harvester.py \
+      --base_url "$BASE_URL" \
+      --start_url "$START_URL" \
+      --link_filter "$LINK_FILTER" \
+      --keywords "$KEYWORDS"
+```
+
+---
+
+## 🔐 Uso com Secrets
+
+Recomendado utilizar variáveis protegidas:
+
+```yaml
+env:
+  BASE_URL: ${{ secrets.BASE_URL }}
+  START_URL: ${{ secrets.START_URL }}
+  LINK_FILTER: ${{ secrets.LINK_FILTER }}
+  KEYWORDS: ${{ secrets.KEYWORDS }}
+```
 
 ---
 
@@ -129,7 +120,7 @@ Os documentos são automaticamente divididos em partes menores para:
 
 * Construção de base de conhecimento técnica
 * Atualização de documentação interna
-* Comparação entre versões de documentação
+* Comparação entre fontes externas e conteúdo interno
 * Preparação de dados para RAG
 * Consulta offline de documentação
 
@@ -139,34 +130,18 @@ Os documentos são automaticamente divididos em partes menores para:
 
 * Não realiza inferência semântica (sem LLM)
 * Classificação baseada em regras simples
-* Pode exigir ajuste de `keywords` para melhor cobertura
-* Não detecta mudanças entre execuções (ainda)
+* Dependente da qualidade do HTML da fonte
 
 ---
 
-## 🚀 Roadmap
+## 🚀 Evolução
 
-Possíveis evoluções:
+Possíveis melhorias:
 
-* Diff entre execuções (detecção de mudanças)
-* Comparação automática com CSV/documentação interna
-* Busca local (TF-IDF / embeddings)
-* Interface CLI mais completa
-* Suporte a múltiplos targets em lote
-
----
-
-## 📌 Filosofia
-
-KnowledgeHarvester não tenta “entender” a documentação.
-
-Ele atua como uma camada de:
-
-* extração
-* limpeza
-* estruturação
-
-O objetivo é **maximizar a utilidade do conteúdo para sistemas posteriores**.
+* Diff entre execuções
+* Indexação para busca local
+* Suporte a múltiplos targets por execução
+* Classificação configurável via CLI
 
 ---
 

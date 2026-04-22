@@ -1,0 +1,132 @@
+name: KnowledgeHarvester
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+env:
+  BASE_URL: ${{ secrets.BASE_URL }}
+  START_URL: ${{ secrets.START_URL }}
+  LINK_FILTER: ${{ secrets.LINK_FILTER }}
+  KEYWORDS: ${{ secrets.KEYWORDS }}
+
+jobs:
+  veracode-package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixar repositorio
+        uses: actions/checkout@v4
+
+      - name: Criar pacote de scan da Veracode
+        run: |
+          CAMINHO_PACOTE=veracode-scan.zip
+
+          zip -r $CAMINHO_PACOTE . \
+            -i '*.py' '*.html' '*.htm' '*.asp' '*.cjs' '*.css' '*.ehtml' '*.es' '*.es6' '*.handlebars' '*.hbs' '*.hjs' '*.js' '*.jsx' '*.json' '*.jsp' '*.map' '*.mjs' '*.mustache' '*.ts' '*.tsx' '*.vue' '*.xhtml' '*.lock' '*.module' '*.inc' '*.profile' '*.install' '*.engine' '*.theme' '*.php4' '*.php5' '*.php7' '*.phtml' '*.txt' \
+            -x '*/node_modules/*' '*/.git/*' '*/dist/*'
+
+      - name: Publicar artefato do pacote da Veracode
+        uses: actions/upload-artifact@v4
+        with:
+          name: veracode-scan-package
+          path: veracode-scan.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  veracode-sca:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Baixar repositorio
+        uses: actions/checkout@v4
+
+      - name: Rodar Veracode SCA
+        env:
+          SRCCLR_API_TOKEN: ${{ secrets.SCA }}
+        run: |
+          curl -sSL 'https://download.sourceclear.com/ci.sh' | bash -s -- scan --update-advisor --allow-dirty
+
+  veracode-upload-and-scan:
+    runs-on: ubuntu-latest
+    needs: veracode-package
+    steps:
+      - name: Baixar pacote da Veracode
+        uses: actions/download-artifact@v4
+        with:
+          name: veracode-scan-package
+
+      - name: Configurar Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Enviar e escanear com Veracode
+        uses: veracode/veracode-uploadandscan-action@0.2.11
+        with:
+          vid: ${{ secrets.VERACODE_ID }}
+          vkey: ${{ secrets.VERACODE_KEY }}
+          criticality: VeryHigh
+          appname: ${{ github.repository }}
+          createprofile: true
+          teams: DEMOs
+          filepath: veracode-scan.zip
+          deleteincompletescan: 1
+          version: ${{ github.run_id }}
+
+  veracode-pipeline-scan:
+    runs-on: ubuntu-latest
+    needs: veracode-package
+    steps:
+      - name: Baixar pacote da Veracode
+        uses: actions/download-artifact@v4
+        with:
+          name: veracode-scan-package
+
+      - name: Rodar Veracode Pipeline Scan
+        uses: veracode/Veracode-pipeline-scan-action@v1.0.20
+        with:
+          vid: ${{ secrets.VERACODE_ID }}
+          vkey: ${{ secrets.VERACODE_KEY }}
+          file: veracode-scan.zip
+          issue_details: true
+
+  knowledge-harvester:
+    runs-on: ubuntu-latest
+    needs:
+      - veracode-pipeline-scan
+      - veracode-upload-and-scan
+      - veracode-sca
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run KnowledgeHarvester
+        run: |
+          python knowledge_harvester.py \
+            --base_url "$BASE_URL" \
+            --start_url "$START_URL" \
+            --link_filter "$LINK_FILTER" \
+            --keywords "$KEYWORDS"
+
+      - name: Zip generated output
+        run: |
+          zip -r artifact.zip output/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: knowledge-harvester-output
+          path: artifact.zip
