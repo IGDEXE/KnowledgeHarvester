@@ -1,49 +1,48 @@
 # KnowledgeHarvester
 
-KnowledgeHarvester é uma ferramenta para **coleta, normalização e estruturação de documentação técnica a partir de fontes web**, com foco em uso automatizado via CLI e integração em pipelines CI/CD.
+KnowledgeHarvester é uma ferramenta para **coleta, normalização e estruturação de documentação técnica a partir de fontes web**, projetada para funcionar tanto localmente quanto em pipelines CI/CD.
 
 ---
 
 ## 🧠 Conceito
 
-A ferramenta percorre uma documentação online, extrai conteúdo relevante e gera uma base local estruturada em Markdown, pronta para:
+O projeto percorre uma documentação online, extrai conteúdo relevante (inclusive de sites modernos com JavaScript) e gera uma base estruturada pronta para uso em:
 
 * análise técnica
 * comparação com documentação interna
-* uso como contexto em LLMs
-* construção de bases de conhecimento
+* sistemas de IA (RAG / contexto)
+* consulta offline
 
 Pipeline:
 
 ```text
-crawl → clean → normalize → classify → chunk → store
+crawl → render → extract → normalize → classify → chunk → store
 ```
 
 ---
 
-## 📦 Saída gerada
+## ⚙️ Requisitos
 
-```text
-output/
-├── raw/          # conteúdo bruto
-├── structured/   # conteúdo com metadados
-├── chunked/      # conteúdo dividido para consumo
+* Python 3.11+
+* Dependências definidas em `requirements.txt`
+
+Instalação:
+
+```bash
+pip install -r requirements.txt
+playwright install
 ```
 
 ---
 
-## ▶️ Como usar (CLI)
+## ▶️ Uso (CLI)
 
-O KnowledgeHarvester não depende de arquivos de configuração.
-Toda a execução é feita via parâmetros.
-
-### Execução básica
+Execução via parâmetros:
 
 ```bash
 python knowledge_harvester.py \
   --base_url "<BASE_URL>" \
   --start_url "<START_URL>" \
-  --link_filter "<FILTER>" \
   --keywords "<KEYWORDS>"
 ```
 
@@ -51,44 +50,50 @@ python knowledge_harvester.py \
 
 ## ⚙️ Parâmetros
 
-| Parâmetro       | Obrigatório | Descrição                                        |
-| --------------- | ----------- | ------------------------------------------------ |
-| `--base_url`    | ✔           | Domínio base da documentação                     |
-| `--start_url`   | ✔           | URL inicial do crawl                             |
-| `--link_filter` | ✖           | Filtra caminhos internos (ex: `/docs/`)          |
-| `--keywords`    | ✖           | Lista separada por vírgula usada para relevância |
-| `--max_pages`   | ✖           | Limite de páginas                                |
-| `--delay`       | ✖           | Delay entre requests                             |
-| `--min_score`   | ✖           | Score mínimo para incluir conteúdo               |
+| Parâmetro       | Obrigatório | Descrição                                  |
+| --------------- | ----------- | ------------------------------------------ |
+| `--base_url`    | ✔           | Domínio base                               |
+| `--start_url`   | ✔           | URL inicial                                |
+| `--keywords`    | ✖           | Lista separada por vírgula para relevância |
+| `--link_filter` | ✖           | Restringe navegação por path               |
+| `--max_pages`   | ✖           | Limite de páginas                          |
+| `--min_score`   | ✖           | Score mínimo para inclusão                 |
 
 ---
 
-## 🧠 Relevância e classificação
-
-A ferramenta utiliza:
-
-* **keywords** → determinam se o conteúdo é relevante
-* **classificação leve** → categorização baseada em termos
-
-Exemplo de formato esperado:
+## 📂 Estrutura de saída
 
 ```text
-keyword1,keyword2,keyword3
+output/
+├── raw/          # conteúdo bruto em Markdown
+├── structured/   # conteúdo com metadados
+├── chunked/      # conteúdo dividido para LLM
 ```
+
+---
+
+## 🧠 Relevância
+
+O sistema usa keywords para determinar importância:
+
+* cada ocorrência aumenta o score
+* páginas abaixo do threshold são descartadas
 
 ---
 
 ## ✂️ Chunking
 
-Os documentos são automaticamente divididos com base em seções (`##`), respeitando limites de tamanho para facilitar uso posterior em LLMs.
+Os documentos são divididos automaticamente para:
+
+* evitar limites de contexto
+* facilitar recuperação de informação
+* melhorar uso em LLMs
 
 ---
 
 ## ⚙️ Uso em CI/CD (GitHub Actions)
 
-O projeto foi projetado para rodar diretamente em pipelines.
-
-### Exemplo de execução no workflow
+### Execução do script
 
 ```yaml
 - name: Run KnowledgeHarvester
@@ -96,52 +101,54 @@ O projeto foi projetado para rodar diretamente em pipelines.
     python knowledge_harvester.py \
       --base_url "$BASE_URL" \
       --start_url "$START_URL" \
-      --link_filter "$LINK_FILTER" \
       --keywords "$KEYWORDS"
 ```
 
 ---
 
-## 🔐 Uso com Secrets
+## 🔐 Configuração via Secrets
 
-Recomendado utilizar variáveis protegidas:
+Recomendado usar variáveis protegidas:
 
 ```yaml
 env:
   BASE_URL: ${{ secrets.BASE_URL }}
   START_URL: ${{ secrets.START_URL }}
-  LINK_FILTER: ${{ secrets.LINK_FILTER }}
   KEYWORDS: ${{ secrets.KEYWORDS }}
 ```
 
 ---
 
-## 🎯 Casos de uso
+## 📦 Publicação de artefatos
 
-* Construção de base de conhecimento técnica
-* Atualização de documentação interna
-* Comparação entre fontes externas e conteúdo interno
-* Preparação de dados para RAG
-* Consulta offline de documentação
+⚠️ **Importante:** não é necessário criar zip manualmente.
+
+O GitHub Actions já faz isso automaticamente:
+
+```yaml
+- name: Upload artifact
+  uses: actions/upload-artifact@v4
+  with:
+    name: knowledge-harvester-output
+    path: output/
+```
+
+---
+
+## 🚀 Características importantes
+
+* Compatível com sites modernos (SPA) via browser headless
+* Estrutura otimizada para uso com LLM
+* Pipeline automatizável
+* Configuração via CLI (sem arquivos estáticos)
 
 ---
 
 ## ⚠️ Limitações
 
-* Não realiza inferência semântica (sem LLM)
-* Classificação baseada em regras simples
-* Dependente da qualidade do HTML da fonte
-
----
-
-## 🚀 Evolução
-
-Possíveis melhorias:
-
-* Diff entre execuções
-* Indexação para busca local
-* Suporte a múltiplos targets por execução
-* Classificação configurável via CLI
+* Pode consumir mais recursos por usar browser headless
+* Crawl não é infinito (controlado por `max_pages`)
+* Qualidade depende da estrutura do site
 
 ---
 

@@ -91,7 +91,8 @@ jobs:
           vkey: ${{ secrets.VERACODE_KEY }}
           file: veracode-scan.zip
           issue_details: true
-          fail_on_severity: "Very High,High"
+          veracode_policy_name: "Veracode Recommended POV"
+          fail_build: true
 
   knowledge-harvester:
     runs-on: ubuntu-latest
@@ -122,12 +123,8 @@ jobs:
             --start_url "https://docs.veracode.com/r/c_about_veracode" \
             --keywords "sast,static analysis,dast,dynamic analysis,sca,software composition analysis,api,authentication,policy,scan,ci,cd,pipeline,security,vulnerability,report,findings"
 
-      - name: Zip generated output
-        run: |
-          zip -r artifact.zip output/
-
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: knowledge-harvester-output
-          path: artifact.zip
+            name: knowledge-harvester-output
+            path: output/
