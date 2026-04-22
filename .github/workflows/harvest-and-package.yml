@@ -72,7 +72,7 @@ jobs:
           createprofile: true
           teams: DEMOs
           filepath: veracode-scan.zip
-          deleteincompletescan: 1
+          deleteincompletescan: 2
           version: ${{ github.run_id }}
 
   veracode-pipeline-scan:
