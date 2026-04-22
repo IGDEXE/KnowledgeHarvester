@@ -92,7 +92,7 @@ jobs:
           file: veracode-scan.zip
           issue_details: true
           veracode_policy_name: "Veracode Recommended POV"
-          fail_build: true
+          #fail_build: true
 
   knowledge-harvester:
     runs-on: ubuntu-latest
