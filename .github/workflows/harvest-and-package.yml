@@ -118,7 +118,7 @@ jobs:
           python knowledge_harvester.py \
             --base_url "$BASE_URL" \
             --start_url "$START_URL" \
-            --link_filter "$LINK_FILTER" \
+            --link_filter "" \
             --keywords "$KEYWORDS"
 
       - name: Zip generated output
