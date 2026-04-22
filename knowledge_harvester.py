@@ -1,12 +1,13 @@
 import argparse
 import asyncio
 from playwright.async_api import async_playwright
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urlparse
 from collections import deque
 from pathlib import Path
 import re
 import hashlib
 from markdownify import markdownify as md
+from bs4 import BeautifulSoup
 
 # -------------------------
 # CLI
@@ -40,11 +41,46 @@ def is_valid(url, base_url, link_filter):
 
 
 def sanitize(url):
-    return re.sub(r"[^a-zA-Z0-9_-]", "_", urlparse(url).path)
+    return re.sub(r"[^a-zA-Z0-9_-]", "_", urlparse(url).path) or "root"
 
 
 def hash_content(text):
     return hashlib.sha256(text.encode()).hexdigest()
+
+
+# -------------------------
+# CLEAN / EXTRACT
+# -------------------------
+
+def clean_html(html):
+    soup = BeautifulSoup(html, "html.parser")
+
+    # remove lixo comum
+    for tag in soup([
+        "nav", "footer", "header", "aside",
+        "script", "style", "noscript",
+        "svg", "button"
+    ]):
+        tag.decompose()
+
+    # remove classes comuns de docs
+    for cls in [
+        "sidebar", "menu", "navigation", "toc",
+        "breadcrumbs", "pagination"
+    ]:
+        for el in soup.select(f".{cls}"):
+            el.decompose()
+
+    return soup
+
+
+def extract_main(soup):
+    main = (
+        soup.find("main") or
+        soup.find("article") or
+        soup.find("div", {"role": "main"})
+    )
+    return main if main else soup.body
 
 
 # -------------------------
@@ -73,23 +109,33 @@ def classify(text):
 
 
 # -------------------------
-# CHUNK
+# CHUNK (SEMÂNTICO + TAMANHO)
 # -------------------------
 
-def chunk_markdown(text, max_size=1800):
-    sections = re.split(r"\n## ", text)
+def chunk_semantic(text, max_size=1500):
     chunks = []
     current = ""
+    title = "unknown"
 
-    for sec in sections:
-        if len(current) + len(sec) < max_size:
-            current += "\n## " + sec
+    for line in text.split("\n"):
+        if line.startswith("#"):
+            if current and len(current) > 200:
+                chunks.append((title, current.strip()))
+                current = ""
+
+            title = line.strip()
+            current += line + "\n"
+
         else:
-            chunks.append(current)
-            current = sec
+            current += line + "\n"
+
+        # fallback por tamanho
+        if len(current) > max_size:
+            chunks.append((title, current.strip()))
+            current = ""
 
     if current:
-        chunks.append(current)
+        chunks.append((title, current.strip()))
 
     return chunks
 
@@ -137,13 +183,19 @@ async def run(config):
                 continue
             seen_hashes.add(h)
 
-            markdown = md(html)
+            soup = clean_html(html)
+            main = extract_main(soup)
+
+            if not main:
+                continue
+
+            markdown = md(str(main))
             relevance = score(markdown, config["keywords"])
 
             if relevance < config["min_score"]:
                 continue
 
-            name = sanitize(url) or "root"
+            name = sanitize(url)
             categories = classify(markdown)
 
             # RAW
@@ -158,12 +210,20 @@ categories: {",".join(categories)}
 """
             (STRUCT / f"{name}.md").write_text(structured, encoding="utf-8")
 
-            # CHUNKS
-            chunks = chunk_markdown(markdown)
-            for i, c in enumerate(chunks):
-                (CHUNK / f"{name}_{i}.md").write_text(c, encoding="utf-8")
+            # CHUNKED (otimizado)
+            chunks = chunk_semantic(markdown)
 
-            # LINKS (agora funciona com SPA)
+            for i, (title, content) in enumerate(chunks):
+                enriched = f"""source: {url}
+title: {title}
+categories: {",".join(categories)}
+chunk_id: {i}
+
+{content}
+"""
+                (CHUNK / f"{name}_{i}.md").write_text(enriched, encoding="utf-8")
+
+            # LINKS (SPA-safe)
             links = await page.eval_on_selector_all(
                 "a[href]",
                 "els => els.map(e => e.href)"
