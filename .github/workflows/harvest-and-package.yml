@@ -91,6 +91,7 @@ jobs:
           vkey: ${{ secrets.VERACODE_KEY }}
           file: veracode-scan.zip
           issue_details: true
+          fail_on_severity: "Very High,High"
 
   knowledge-harvester:
     runs-on: ubuntu-latest
@@ -115,11 +116,10 @@ jobs:
 
       - name: Run KnowledgeHarvester
         run: |
-          python knowledge_harvester.py \
-            --base_url "$BASE_URL" \
-            --start_url "$START_URL" \
-            --link_filter "" \
-            --keywords "$KEYWORDS"
+            python knowledge_harvester.py \
+            --base_url "https://docs.veracode.com" \
+            --start_url "https://docs.veracode.com/r/c_about_veracode" \
+            --keywords "sast,static analysis,dast,dynamic analysis,sca,software composition analysis,api,authentication,policy,scan,ci,cd,pipeline,security,vulnerability,report,findings"
 
       - name: Zip generated output
         run: |
