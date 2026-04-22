@@ -1,12 +1,11 @@
-import requests
-from bs4 import BeautifulSoup
+import argparse
+import asyncio
+from playwright.async_api import async_playwright
 from urllib.parse import urljoin, urlparse
 from collections import deque
 from pathlib import Path
-import argparse
 import re
 import hashlib
-import time
 from markdownify import markdownify as md
 
 # -------------------------
@@ -20,8 +19,7 @@ def parse_args():
     parser.add_argument("--start_url", required=True)
     parser.add_argument("--link_filter", default="")
     parser.add_argument("--keywords", default="")
-    parser.add_argument("--max_pages", type=int, default=500)
-    parser.add_argument("--delay", type=float, default=0.2)
+    parser.add_argument("--max_pages", type=int, default=200)
     parser.add_argument("--min_score", type=int, default=2)
 
     return parser.parse_args()
@@ -45,23 +43,8 @@ def sanitize(url):
     return re.sub(r"[^a-zA-Z0-9_-]", "_", urlparse(url).path)
 
 
-def clean_html(soup):
-    for tag in soup(["script", "style", "nav", "footer", "header", "aside"]):
-        tag.decompose()
-    return soup
-
-
-def extract_main(soup):
-    return (
-        soup.find("main") or
-        soup.find("article") or
-        soup.find("div", {"role": "main"}) or
-        soup.body
-    )
-
-
 def hash_content(text):
-    return hashlib.md5(text.encode()).hexdigest()
+    return hashlib.sha256(text.encode()).hexdigest()
 
 
 # -------------------------
@@ -70,19 +53,11 @@ def hash_content(text):
 
 def score(text, keywords):
     t = text.lower()
-    s = 0
-
-    for k in keywords:
-        if k in t:
-            s += 2
-
-    return s
+    return sum(2 for k in keywords if k in t)
 
 
 def classify(text):
-    # classificação leve genérica
     t = text.lower()
-
     categories = []
 
     if "api" in t:
@@ -123,7 +98,7 @@ def chunk_markdown(text, max_size=1800):
 # MAIN
 # -------------------------
 
-def run(config):
+async def run(config):
     ROOT = Path("output")
     RAW = ROOT / "raw"
     STRUCT = ROOT / "structured"
@@ -136,65 +111,69 @@ def run(config):
     queue = deque([config["start_url"]])
     seen_hashes = set()
 
-    while queue and len(visited) < config["max_pages"]:
-        url = queue.popleft()
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        page = await browser.new_page()
 
-        if url in visited:
-            continue
+        while queue and len(visited) < config["max_pages"]:
+            url = queue.popleft()
 
-        visited.add(url)
+            if url in visited:
+                continue
 
-        try:
-            r = requests.get(url, timeout=10)
-            r.raise_for_status()
-        except:
-            continue
+            visited.add(url)
+            print(f"Visiting: {url}")
 
-        soup = BeautifulSoup(r.text, "html.parser")
-        soup = clean_html(soup)
+            try:
+                await page.goto(url, timeout=30000)
+                await page.wait_for_load_state("networkidle")
+            except:
+                continue
 
-        main = extract_main(soup)
-        if not main:
-            continue
+            html = await page.content()
 
-        content = md(str(main))
+            h = hash_content(html)
+            if h in seen_hashes:
+                continue
+            seen_hashes.add(h)
 
-        h = hash_content(content)
-        if h in seen_hashes:
-            continue
-        seen_hashes.add(h)
+            markdown = md(html)
+            relevance = score(markdown, config["keywords"])
 
-        relevance = score(content, config["keywords"])
-        if relevance < config["min_score"]:
-            continue
+            if relevance < config["min_score"]:
+                continue
 
-        name = sanitize(url)
-        categories = classify(content)
+            name = sanitize(url) or "root"
+            categories = classify(markdown)
 
-        # RAW
-        (RAW / f"{name}.md").write_text(content, encoding="utf-8")
+            # RAW
+            (RAW / f"{name}.md").write_text(markdown, encoding="utf-8")
 
-        # STRUCTURED
-        structured = f"""source: {url}
+            # STRUCTURED
+            structured = f"""source: {url}
 score: {relevance}
 categories: {",".join(categories)}
 
-{content}
+{markdown}
 """
-        (STRUCT / f"{name}.md").write_text(structured, encoding="utf-8")
+            (STRUCT / f"{name}.md").write_text(structured, encoding="utf-8")
 
-        # CHUNKS
-        chunks = chunk_markdown(content)
-        for i, c in enumerate(chunks):
-            (CHUNK / f"{name}_{i}.md").write_text(c, encoding="utf-8")
+            # CHUNKS
+            chunks = chunk_markdown(markdown)
+            for i, c in enumerate(chunks):
+                (CHUNK / f"{name}_{i}.md").write_text(c, encoding="utf-8")
 
-        # LINKS
-        for a in soup.find_all("a", href=True):
-            href = urljoin(config["base_url"], a["href"])
-            if is_valid(href, config["base_url"], config["link_filter"]):
-                queue.append(href)
+            # LINKS (agora funciona com SPA)
+            links = await page.eval_on_selector_all(
+                "a[href]",
+                "els => els.map(e => e.href)"
+            )
 
-        time.sleep(config["delay"])
+            for link in links:
+                if is_valid(link, config["base_url"], config["link_filter"]):
+                    queue.append(link)
+
+        await browser.close()
 
     print(f"Done. Pages processed: {len(visited)}")
 
@@ -212,8 +191,7 @@ if __name__ == "__main__":
         "link_filter": args.link_filter,
         "keywords": args.keywords.split(",") if args.keywords else [],
         "max_pages": args.max_pages,
-        "delay": args.delay,
         "min_score": args.min_score
     }
 
-    run(config)
+    asyncio.run(run(config))
